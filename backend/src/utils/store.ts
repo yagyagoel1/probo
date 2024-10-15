@@ -15,6 +15,9 @@ export const ORDERBOOK:{
             
 
             }
+            buyOrders:{
+                [user:string]:number;
+            }
         };
     };
 }} = {}
