@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import { INR_BALANCES, ORDERBOOK, STOCK_BALANCES } from "../utils/store";
+import { broadcastOrderBookUpdate } from "../websocket";
 
 export const createUser = async (req: Request, res: Response) => {
     const { userId } = req.params;
@@ -104,6 +105,7 @@ export const buyStock = async (req: Request, res: Response) => {
                     if (sortedPrice.length <= 0) {
                         ORDERBOOK[stockSymbol][stockType][price].buyOrders[userId] = quantity;
                         res.status(200).json("order is placed and pending");
+                        broadcastOrderBookUpdate()
                         return;
                     }
 
@@ -151,9 +153,11 @@ export const buyStock = async (req: Request, res: Response) => {
                     if (quantity > 0) {
                         ORDERBOOK[stockSymbol][stockType][price].buyOrders[userId] = quantity;
                         res.status(200).send(`Buy order matched partially, ${quantity} remaining`);
+                        broadcastOrderBookUpdate()
                         return;
                     } else {
                         res.status(200).send(`Buy order matched completely`);
+                        broadcastOrderBookUpdate()
                         return;
                     }
                 }
@@ -171,6 +175,7 @@ export const buyStock = async (req: Request, res: Response) => {
 
                 ORDERBOOK[stockSymbol][stockType][price].buyOrders[userId] = quantity;
                 res.status(200).send("Buy order placed and pending");
+                broadcastOrderBookUpdate()
                 return;
             }
         } else {
@@ -251,6 +256,7 @@ export const sellStock = async (req: Request, res: Response) => {
 
                 if (quantity <= 0) {
                     res.status(200).send("sell order placed and executed");
+                    broadcastOrderBookUpdate()
                     return;
                 }
             }
@@ -262,6 +268,7 @@ export const sellStock = async (req: Request, res: Response) => {
             ORDERBOOK[stockSymbol][stockType][price].orders[userId] = (ORDERBOOK[stockSymbol][stockType][price].orders[userId] || 0) + quantity;
 
             res.status(200).send(`Sell order placed for ${quantity} '${stockType}' options at price ${price}.`);
+            broadcastOrderBookUpdate()
             return;
         } else {
             res.status(400).send("Insufficient stock balance");
