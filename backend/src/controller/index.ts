@@ -67,38 +67,49 @@ export const onrampInr = async(req:Request,res:Response)=>{
     }
 }
 export const buyStock = async (req: Request, res: Response) => {
-    let { userId, stockSymbol, quantity, price, stockType } = req.body;
-    if (!userId || !stockSymbol || !quantity || !price || !stockType) {
-         res.status(400).send("missing parameters");
-         return;
-    }
-    if (!(stockType === "yes" || stockType === "no")) {
-         res.status(400).send("invalid stock type");
-         return;
-        }
-    if (!(typeof quantity === "number" && typeof price === "string")) {
-         res.status(400).send("invalid quantity or price");
-         return;
+    let { userId, stockSymbol, quantity, price } = req.body;
+    let stockType = req.body.stockType as "yes" | "no";
 
-        }
+    if (!userId || !stockSymbol || !quantity || !price || !stockType) {
+        res.status(400).send("missing parameters");
+        return;
+    }
+
+    if (!(stockType === "yes" || stockType === "no")) {
+        res.status(400).send("invalid stock type");
+        return;
+    }
+
+    if (!(typeof quantity === "number" && typeof price === "string")) {
+        res.status(400).send("invalid quantity or price");
+        return;
+    }
+
     if (!(typeof userId === "string" && typeof stockSymbol === "string")) {
-         res.status(400).send("invalid userId or stockSymbol");
-         return;
-        }
+        res.status(400).send("invalid userId or stockSymbol");
+        return;
+    }
+
     stockSymbol = String(stockSymbol);
-    if (INR_BALANCES[userId] && STOCK_BALANCES[stockSymbol]) {
+
+    if (INR_BALANCES[userId] && STOCK_BALANCES[userId]) {
         if (INR_BALANCES[userId].balance >= quantity * Number(price)) {
             INR_BALANCES[userId].balance -= (quantity * Number(price));
-            INR_BALANCES[userId].locked += (quantity * Number(price)) ;
+            INR_BALANCES[userId].locked += (quantity * Number(price));
+
             if (ORDERBOOK[stockSymbol]) {
-                const stock = ORDERBOOK[stockSymbol]?.[stockType as "yes" | "no"];
+                const stock = ORDERBOOK[stockSymbol][stockType];
                 if (stock) {
                     const sortedPrice = Object.keys(stock).sort((a, b) => Number(a) - Number(b));
-                    if (sortedPrice.length > 0) {
-                         ORDERBOOK[stockSymbol][stockType as "yes"|"no"][price].buyOrders[userId]=quantity
+                    if (sortedPrice.length <= 0) {
+                        ORDERBOOK[stockSymbol][stockType][price].buyOrders[userId] = quantity;
+                        res.status(200).json("order is placed and pending");
+                        return;
                     }
+
                     const toPay = [];
                     const actualQuantity = quantity;
+
                     for (let i = 0; i < sortedPrice.length; i++) {
                         if (Number(sortedPrice[i]) > Number(price)) {
                             break;
@@ -111,33 +122,34 @@ export const buyStock = async (req: Request, res: Response) => {
                             Object.keys(orders).forEach((key) => {
                                 if (orders[key] > quantity) {
                                     keys[key] = quantity;
-                                    ORDERBOOK[stockSymbol][stockType as "yes" | "no"][sortedPrice[i]].orders[key] -= quantity;
+                                    ORDERBOOK[stockSymbol][stockType][sortedPrice[i]].orders[key] -= quantity;
                                     quantity = 0;
                                 } else {
                                     keys[key] = orders[key];
                                     quantity -= orders[key];
-                                    delete ORDERBOOK[stockSymbol][stockType as "yes" | "no"][sortedPrice[i]].orders[key];
+                                    delete ORDERBOOK[stockSymbol][stockType][sortedPrice[i]].orders[key];
                                 }
                             });
                         } else if (total <= quantity) {
                             quantity -= total;
                             toPay.push(orders);
-                            delete ORDERBOOK[stockSymbol]?.[stockType as "yes" | "no"][sortedPrice[i]];
+                            delete ORDERBOOK[stockSymbol][stockType][sortedPrice[i]];
                         }
                     }
+
                     for (let i = 0; i < toPay.length; i++) {
-                        const keyd = Object.keys(toPay[i]);
-                        for (let j = 0; j < keyd.length; j++) {
-                            const user = keyd[j];
+                        const keys = Object.keys(toPay[i]);
+                        for (let j = 0; j < keys.length; j++) {
+                            const user = keys[j];
                             const amount = toPay[i][user] * Number(sortedPrice[i]);
-                            STOCK_BALANCES[user][stockSymbol as string][stockType as "yes" | "no"].locked -= toPay[i][user];
+                            STOCK_BALANCES[user][stockSymbol][stockType].locked -= toPay[i][user];
                             INR_BALANCES[userId].locked -= amount;
                             INR_BALANCES[user].balance += amount;
                         }
                     }
 
                     if (quantity > 0) {
-                        ORDERBOOK[stockSymbol][stockType as "yes"|"no"][price].buyOrders[userId] = quantity
+                        ORDERBOOK[stockSymbol][stockType][price].buyOrders[userId] = quantity;
                         res.status(200).send(`Buy order matched partially, ${quantity} remaining`);
                         return;
                     } else {
@@ -146,59 +158,121 @@ export const buyStock = async (req: Request, res: Response) => {
                     }
                 }
             } else {
+                ORDERBOOK[stockSymbol] = {
+                    yes: {},
+                    no: {},
+                };
+
+                ORDERBOOK[stockSymbol][stockType][price] = {
+                    total: 0,
+                    orders: {},
+                    buyOrders: {},
+                };
+
+                ORDERBOOK[stockSymbol][stockType][price].buyOrders[userId] = quantity;
                 res.status(200).send("Buy order placed and pending");
-                return 
+                return;
             }
         } else {
             res.status(400).send("Insufficient INR balance");
-            return 
+            return;
         }
     } else {
-         res.status(400).send("user doesn't exist");
-         return
+        res.status(400).send("user doesn't exist");
+        return;
     }
 };
 
+
+
 export const sellStock = async (req: Request, res: Response) => {
-    let { userId, stockSymbol, quantity, price, stockType } = req.body;
+    let { userId, stockSymbol, quantity, price } = req.body;
+    let stockType = req.body.stockType as "yes" | "no";
+    
     if (!userId || !stockSymbol || !quantity || !price || !stockType) {
-         res.status(400).send("missing parameters");
-         return;
+        res.status(400).send("missing parameters");
+        return;
     }
     if (!(stockType === "yes" || stockType === "no")) {
-         res.status(400).send("invalid stock type");
-         return;
-        }
-    if (!(typeof quantity === "number" && typeof price === "string")) {
-         res.status(400).send("invalid quantity or price");
-         return;
-
-        }
-    if (!(typeof userId === "string" && typeof stockSymbol === "string")) {
-         res.status(400).send("invalid userId or stockSymbol");
-         return;
-        }
-    stockSymbol = String(stockSymbol);
-    if (INR_BALANCES[userId] && STOCK_BALANCES[stockSymbol]) {
-        if (STOCK_BALANCES[userId][stockSymbol][stockType as "yes" | "no"].quantity >= quantity) {
-            STOCK_BALANCES[userId][stockSymbol][stockType as "yes" | "no"].quantity -= quantity;
-            STOCK_BALANCES[userId][stockSymbol][stockType as "yes" | "no"].locked += quantity;
-            ORDERBOOK[stockSymbol] = ORDERBOOK[stockSymbol] || {stockType:{}}
-                ORDERBOOK[stockSymbol as string][stockType as "yes"|"no"] = ORDERBOOK[stockSymbol]?.[stockType as "yes" | "no"]|| { price:{}}
-                ORDERBOOK[stockSymbol as string][stockType as "yes"|"no"].price = ORDERBOOK[stockSymbol]?.[stockType as "yes" | "no"].price || {total:0,orders:{userId:0}}
-                ORDERBOOK[stockSymbol as string][stockType as "yes"|"no"].price.total += quantity;
-                ORDERBOOK[stockSymbol as string][stockType as "yes"|"no"].price.orders[userId] += quantity;
-            res.status(200).send(`Sell order placed for ${quantity} '${stockType}' options at price ${price}.`);
-            return
-        }else{
-            res.status(400).send("Insufficient stock balance");
-            return
-        }
-    }else{
-        res.status(400).send("user doesn't exist");
-        return
+        res.status(400).send("invalid stock type");
+        return;
     }
-}
+    if (!(typeof quantity === "number" && typeof price === "string")) {
+        res.status(400).send("invalid quantity or price");
+        return;
+    }
+    if (!(typeof userId === "string" && typeof stockSymbol === "string")) {
+        res.status(400).send("invalid userId or stockSymbol");
+        return;
+    }
+
+    stockSymbol = String(stockSymbol);
+
+    if (INR_BALANCES[userId] && STOCK_BALANCES[userId]) {
+        if (STOCK_BALANCES[userId][stockSymbol][stockType].quantity >= quantity) {
+            STOCK_BALANCES[userId][stockSymbol][stockType].quantity -= quantity;
+            STOCK_BALANCES[userId][stockSymbol][stockType].locked += quantity;
+
+            const stock = ORDERBOOK[stockSymbol]?.[stockType] || {};
+            const sortedPricing = Object.keys(stock).sort((a, b) => Number(a) - Number(b));
+
+            if (sortedPricing.length > 0) {
+                let buyOrder: { [userId: string]: number } = {}, actualQuantity = quantity;
+
+                for (let i = 0; i < sortedPricing.length; i++) {
+                    if (Number(sortedPricing[i]) < Number(price)) {
+                        if (stock[sortedPricing[i]]?.buyOrders) {
+                            buyOrder = stock[sortedPricing[i]].buyOrders;
+                            
+                            Object.keys(buyOrder).forEach(key => {
+                                if (quantity - buyOrder[key] >= 0) {
+                                    INR_BALANCES[key].locked -= Number(sortedPricing[i]) * buyOrder[key];
+                                    STOCK_BALANCES[userId][stockSymbol][stockType].locked -= buyOrder[key];
+                                    STOCK_BALANCES[key][stockSymbol][stockType].quantity += buyOrder[key];
+                                    INR_BALANCES[userId].balance += Number(sortedPricing[i]) * buyOrder[key];
+                                    quantity -= buyOrder[key];
+                                    delete ORDERBOOK[stockSymbol][stockType][sortedPricing[i]].buyOrders[key];
+                                } else {
+                                    INR_BALANCES[key].locked -= Number(sortedPricing[i]) * quantity;
+                                    STOCK_BALANCES[userId][stockSymbol][stockType].locked -= quantity;
+                                    STOCK_BALANCES[key][stockSymbol][stockType].quantity += quantity;
+                                    INR_BALANCES[userId].balance += Number(sortedPricing[i]) * quantity;
+                                    ORDERBOOK[stockSymbol][stockType][sortedPricing[i]].buyOrders[key] -= quantity;
+                                    quantity = 0;
+                                }
+                            });
+
+                            if (quantity <= 0) {
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                if (quantity <= 0) {
+                    res.status(200).send("sell order placed and executed");
+                    return;
+                }
+            }
+
+            ORDERBOOK[stockSymbol] = ORDERBOOK[stockSymbol] || {};
+            ORDERBOOK[stockSymbol][stockType] = ORDERBOOK[stockSymbol][stockType] || {};
+            ORDERBOOK[stockSymbol][stockType][price] = ORDERBOOK[stockSymbol][stockType][price] || { total: 0, orders: {}, buyOrders: {} };
+            ORDERBOOK[stockSymbol][stockType][price].total += quantity;
+            ORDERBOOK[stockSymbol][stockType][price].orders[userId] = (ORDERBOOK[stockSymbol][stockType][price].orders[userId] || 0) + quantity;
+
+            res.status(200).send(`Sell order placed for ${quantity} '${stockType}' options at price ${price}.`);
+            return;
+        } else {
+            res.status(400).send("Insufficient stock balance");
+            return;
+        }
+    } else {
+        res.status(400).send("user doesn't exist");
+        return;
+    }
+};
+
 
 export const getStockSymbolOrders = async (req: Request, res: Response) => {
     const { stockSymbol } = req.params;
